@@ -1,11 +1,16 @@
 package main
 
 import (
-	"fmt"
 	"bufio"
 	"strings"
 	"os"
 	"sync"
+	"log"
+)
+
+const (
+	// 1 MB
+	BUFFER_SIZE = 1024 * 1024
 )
 
 type LogProcessort interface {
@@ -16,6 +21,7 @@ type LogProcessort interface {
 }
 
 type LogProcessor struct {
+	mut sync.RWMutex
 	scanners []*bufio.Scanner
 	error_w chan<-string
 	error_r <-chan string
@@ -30,53 +36,75 @@ func (_*LogProcessor) is_error(line string) bool {
 }
 
 func (proc* LogProcessor) read_log(scanner *bufio.Scanner, wg *sync.WaitGroup) {
+	proc.mut.Lock()
+	defer wg.Done()
+	defer proc.mut.Unlock()
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if proc.is_error(line) {
 			proc.error_w <- line
 		}
 	}
-	wg.Done()
 }
 
-func (proc *LogProcessor) write_log(line string, wg *sync.WaitGroup) {
-	fmt.Println(line)
-	f, err := os.OpenFile(proc.output_file, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+func (proc *LogProcessor) write_log(line string, writer *bufio.Writer) {
+	n, err := writer.Write([]byte(line + "\n"))
 	if err != nil {
-		panic(err)
+		log.Fatalf("ERROR: written %d, Could not write to file, due to %s", n, err)
 	}
-	if _, err = f.WriteString(line)
-	err != nil {
-    panic(err)
-	}
-	wg.Done()
 }
 
-func (proc *LogProcessor) process_logs() {
-	error_ch := make(chan string, 2)
+func (proc *LogProcessor) process_logs()  error {
+	error_ch := make(chan string, 200)
 	proc.error_r = error_ch
 	proc.error_w = error_ch
 
-	wg := sync.WaitGroup{}
+	read_wg := sync.WaitGroup{}
 	
 	for _, scanner := range proc.scanners {
-		wg.Add(1)
-		go proc.read_log(scanner, &wg)
+		read_wg.Add(1)
+		go proc.read_log(scanner, &read_wg)
 	}
 
-	wg.Add(1)
+	write_wg := sync.WaitGroup{}
+
+	write_file, err := os.OpenFile(proc.output_file, os.O_CREATE | os.O_APPEND | os.O_WRONLY, 0644)
+	writer := bufio.NewWriterSize(write_file, BUFFER_SIZE)
+
+	if err != nil { return err }
+
+	write_wg.Add(1)
 	go func () {
+		defer write_wg.Done()
+
 		for {
 			line, ok := <- proc.error_r
 			if !ok {
-				fmt.Println("Closed")
+				log.Println("OVER")
+				break
 			}
-			proc.write_log(line, &wg)
+			proc.write_log(line, writer)
 		}
 	}()
 
-	wg.Wait()
+	read_wg.Wait()
+
 	close(error_ch)
+
+	write_wg.Wait()
+
+	error := writer.Flush()
+	if error != nil {
+		log.Printf("ERROR: Could not write to file due to: %s \n", error)
+	}
+	error = write_file.Close()
+	
+	if error != nil {
+		log.Printf("ERROR: Could not close file due to: %s \n", error)
+	}
+
+	return nil
 }
 
 func get_scanner(path string) (*bufio.Scanner, error) {
@@ -85,7 +113,9 @@ func get_scanner(path string) (*bufio.Scanner, error) {
 		return nil, err
 	}
 
-	scanner := bufio.NewScanner(bufio.NewReader(file))
+	scanner := bufio.NewScanner(file)
+	buffer := make([]uint8, BUFFER_SIZE)
+	scanner.Buffer(buffer, BUFFER_SIZE)
 
 	return scanner, nil
 }
@@ -110,7 +140,5 @@ func ProcessLogs(inputFiles []string, outputFile string) error {
 		log_processor.scanner_add(scanner)
 	}
 
-	log_processor.process_logs()
-
-	return nil
+	return log_processor.process_logs()
 }
