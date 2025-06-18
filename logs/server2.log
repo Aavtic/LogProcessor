@@ -1,0 +1,4 @@
+INFO: 2Server started successfully
+ERROR: 2Failed to connect to database
+INFO: 2Request processed
+ERROR: 2Timeout occurred while processing request

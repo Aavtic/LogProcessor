@@ -1,0 +1,28 @@
+You are building a log processing system in Go. Your program should read multiple log files concurrently, process each line to extract error messages (lines containing "ERROR"), and write them into an output file.
+Your implementation should follow these constraints:
+Use goroutines to read multiple log files concurrently.
+Use channels to communicate extracted error messages between goroutines.
+Use a single writer goroutine to write the extracted errors to an output file.
+Ensure graceful termination by handling synchronization properly with sync.WaitGroup and closing channels appropriately.
+Function Signature:
+func ProcessLogs(inputFiles []string, outputFile string) error
+
+Example Usage:
+inputFiles := []string{"server1.log", "server2.log", "server3.log"}
+err := ProcessLogs(inputFiles, "errors.log")
+if err != nil {
+    log.Fatal(err)
+}
+
+Example Input (server1.log, server2.log, etc.):
+INFO: Server started successfully
+ERROR: Failed to connect to database
+INFO: Request processed
+ERROR: Timeout occurred while processing request
+
+Example Output (errors.log):
+ERROR: Failed to connect to database
+ERROR: Timeout occurred while processing request
+
+Challenge:
+Modify your solution to handle very large files efficiently using buffered reading (bufio.Scanner).
